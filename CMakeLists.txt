@@ -8,4 +8,6 @@ add_executable(clox
   src/memory.c
   src/value.c
   src/vm.c
+  src/compiler.c
+  src/scanner.c
 )

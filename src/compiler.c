@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "compiler.h"
+#include "memory.h"
 #include "scanner.h"
 
 #ifdef DEBUG_PRINT_CODE
@@ -150,7 +151,7 @@ static void grouping() {
 }
 
 static void number() {
-    double value = strod(parser.previous.start, NULL);
+    double value = strtod(parser.previous.start, NULL);
     emit_constant(value);
 }
 
