@@ -3,9 +3,9 @@ project(clox) # VERSION 0.0.0-20211225
 
 add_executable(clox
   src/chunk.c
+  src/memory.c
   src/debug.c
   src/main.c
-  src/memory.c
   src/value.c
   src/vm.c
   src/compiler.c

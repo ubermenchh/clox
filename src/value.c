@@ -2,8 +2,8 @@
 #include <stdbool.h>
 #include <string.h>
 
-#include "object.h"
 #include "memory.h"
+#include "object.h"
 #include "value.h"
 
 void init_value_array(ValueArray *array) {
