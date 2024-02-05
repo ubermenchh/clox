@@ -18,6 +18,8 @@ typedef enum {
     OP_SUBTRACT,
     OP_MULTIPLY,
     OP_DIVIDE,
+    OP_JUMP_IF_FALSE,
+    OP_JUMP,
     OP_PRINT,
     OP_POP,
     OP_GET_LOCAL,
@@ -25,6 +27,7 @@ typedef enum {
     OP_GET_GLOBAL,
     OP_SET_GLOBAL,
     OP_DEFINE_GLOBAL,
+    OP_LOOP,
     OP_RETURN,
 } OpCode;
 
