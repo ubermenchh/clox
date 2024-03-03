@@ -1,9 +1,9 @@
 #ifndef clox_vm_h
 #define clox_vm_h
 
+#include "chunk.h"
 #include "object.h"
 #include "table.h"
-#include "chunk.h"
 #include "value.h"
 
 #define FRAMES_MAX 64

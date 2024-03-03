@@ -28,6 +28,7 @@ typedef enum {
     OP_SET_GLOBAL,
     OP_DEFINE_GLOBAL,
     OP_LOOP,
+    OP_CALL,
     OP_RETURN,
 } OpCode;
 
