@@ -14,6 +14,9 @@
 #define FREE_ARRAY(type, pointer, old_count) reallocate(pointer, sizeof(type) * (old_count), 0)
 
 void *reallocate(void *pointer, size_t old_size, size_t new_size);
+void mark_object(Obj *object);
+void mark_value(Value value);
+void collect_garbage();
 void free_objects();
 
 #endif
