@@ -91,6 +91,12 @@ static void blacken_object(Obj* object) {
             mark_array(&function->chunk.constants);
             break;
         }
+        case OBJ_INSTANCE: {
+            ObjInstance *instance = (ObjInstance*)object;
+            mark_object((Obj*)instance->klass);
+            mark_table(&instance->fields);
+            break;
+        }
         case OBJ_UPVALUE:
             mark_value(((ObjUpvalue*)object)->closed);
             break;
@@ -135,6 +141,12 @@ static void free_object(Obj *object) {
         }
         case OBJ_UPVALUE: {
             FREE(ObjUpvalue, object);
+            break;
+        }
+        case OBJ_INSTANCE: {
+            ObjInstance *instance = (ObjInstance*)object;
+            free_table(&instance->fields);
+            FREE(ObjInstance, instance);
             break;
         }
     }

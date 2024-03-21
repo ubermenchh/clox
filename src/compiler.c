@@ -239,6 +239,7 @@ static void expression();
 static ParseRule *get_rule(TokenType type);
 static void parse_precedence(Precedence precedence);
 static uint8_t argument_list();
+static uint8_t identifier_constant(Token *name);
 
 static void binary(bool can_assign) {
     TokenType operator_type = parser.previous.type;
@@ -263,6 +264,18 @@ static void binary(bool can_assign) {
 static void call(bool can_assign) {
     uint8_t arg_count = argument_list();
     emit_bytes(OP_CALL, arg_count);
+}
+
+static void dot(bool can_assign) {
+    consume(TOKEN_IDENTIFIER, "Expect property name after '.'.");
+    uint8_t name = identifier_constant(&parser.previous);
+
+    if (can_assign && match(TOKEN_EQUAL)) {
+        expression();
+        emit_bytes(OP_SET_PROPERTY, name);
+    } else {
+        emit_bytes(OP_GET_PROPERTY, name);
+    }
 }
 
 static void literal(bool can_assign) {
@@ -301,7 +314,6 @@ static void string(bool can_assign) {
     emit_constant(OBJ_VAL(copy_string(parser.previous.start + 1, parser.previous.length - 2)));
 }
 
-static uint8_t identifier_constant(Token *name);
 static int resolve_local(Compiler *compiler, Token *name);
 static int resolve_upvalue(Compiler *compiler, Token *name); 
 
@@ -359,7 +371,7 @@ ParseRule rules[] = {
     [TOKEN_LEFT_BRACE] = {NULL, NULL, PREC_NONE},
     [TOKEN_RIGHT_BRACE] = {NULL, NULL, PREC_NONE},
     [TOKEN_COMMA] = {NULL, NULL, PREC_NONE},
-    [TOKEN_DOT] = {NULL, NULL, PREC_NONE},
+    [TOKEN_DOT] = {NULL, dot, PREC_CALL},
     [TOKEN_MINUS] = {unary, binary, PREC_NONE},
     [TOKEN_PLUS] = {NULL, binary, PREC_NONE},
     [TOKEN_SEMICOLON] = {NULL, NULL, PREC_NONE},
