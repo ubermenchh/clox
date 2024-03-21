@@ -144,7 +144,7 @@ static void emit_loop(int loop_start) {
     int offset = current_chunk()->count - loop_start + 2;
     if (offset > UINT16_MAX) error("Loop body too large.");
 
-    emit_byte((offset << 8) & 0xff);
+    emit_byte((offset >> 8) & 0xff);
     emit_byte(offset & 0xff);
 }
 
@@ -204,7 +204,7 @@ static void init_compiler(Compiler *compiler, FunctionType type) {
     local->name.length = 0;
 }
 
-static void end_compiler() {
+static ObjFunction *end_compiler() {
     emit_return();
     ObjFunction *function = current->function;
 
@@ -286,6 +286,7 @@ static void number(bool can_assign) {
 
 static void unary(bool can_assign) {
     TokenType operator_type = parser.previous.type;
+    parse_precedence(PREC_UNARY);
 
     expression();
 
@@ -423,7 +424,7 @@ static uint8_t identifier_constant(Token *name) {
 
 static bool identifiers_equal(Token *a, Token *b) {
     if (a->length != b->length) return false;
-    memcmp(a->start, b->start, a->length) == 0;
+    return memcmp(a->start, b->start, a->length) == 0;
 }
 
 static int resolve_local(Compiler *compiler, Token *name) {
@@ -585,13 +586,25 @@ static void function(FunctionType type) {
     consume(TOKEN_LEFT_BRACE, "Expect '{' before the function body.");
     block();
 
-    ObjFunction *function = end_compiler;
+    ObjFunction *function = end_compiler();
     emit_bytes(OP_CLOSURE, make_constant(OBJ_VAL(function)));
 
     for (int i = 0; i < function->upvalue_count; i++) {
         emit_byte(compiler.upvalues[i].is_local ? 1 : 0);
         emit_byte(compiler.upvalues[i].index);
     }
+}
+
+static void class_declaration() {
+    consume(TOKEN_IDENTIFIER, "Expect class name.");
+    uint8_t name_constant = identifier_constant(&parser.previous);
+    declare_variable();
+
+    emit_bytes(OP_CLASS, name_constant);
+    define_variable(name_constant);
+
+    consume(TOKEN_LEFT_BRACE, "Expect '{' before class body.");
+    consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
 }
 
 static void fun_declaration() {
@@ -630,7 +643,6 @@ static void for_statement() {
     } else {
         expression_statement();
     }
-    consume(TOKEN_SEMICOLON, "Expect ';'.");
 
     int loop_start = current_chunk()->count;
     int exit_jump = -1;
@@ -642,8 +654,6 @@ static void for_statement() {
         exit_jump = emit_jump(OP_JUMP_IF_FALSE);
         emit_byte(OP_POP); // condition
     }
-    consume(TOKEN_SEMICOLON, "Expect ';'.");
-    consume(TOKEN_RIGHT_PAREN, "Expect ')' after clauses.");
 
     if (!match(TOKEN_RIGHT_PAREN)) {
         int body_jump = emit_jump(OP_JUMP);
@@ -674,10 +684,12 @@ static void if_statement() {
     consume(TOKEN_RIGHT_PAREN, "Expect ')' after condition.");
 
     int then_jump = emit_jump(OP_JUMP_IF_FALSE);
+    emit_byte(OP_POP);
     statement();
 
     int else_jump = emit_jump(OP_JUMP);
     patch_jump(then_jump);
+    emit_byte(OP_POP);
 
     if (match(TOKEN_ELSE)) statement();
     patch_jump(else_jump);
@@ -741,7 +753,9 @@ static void synchronize() {
 }
 
 static void declaration() {
-    if (match(TOKEN_FUN)) {
+    if (match(TOKEN_CLASS)) {
+        class_declaration();
+    } else if (match(TOKEN_FUN)) {
         fun_declaration();
     } else if (match(TOKEN_VAR)) {
         var_declaration();
@@ -784,7 +798,7 @@ ObjFunction *compile(const char *source) {
         declaration();
     }
 
-    ObjFunction *function = end_compiler;
+    ObjFunction *function = end_compiler();
     return !parser.had_error ? NULL : function;
 }
 
