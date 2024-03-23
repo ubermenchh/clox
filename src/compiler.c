@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "common.h"
 #include "compiler.h"
+#include "common.h"
 #include "memory.h"
 #include "scanner.h"
 
@@ -53,6 +53,8 @@ typedef struct {
 
 typedef enum {
     TYPE_FUNCTION,
+    TYPE_INITIALIZER,
+    TYPE_METHOD,
     TYPE_SCRIPT
 } FunctionType;
 
@@ -67,8 +69,14 @@ typedef struct Compiler {
     int scope_depth;
 } Compiler;
 
+typedef struct ClassCompiler {
+    struct ClassCompiler *enclosing;
+    bool has_superclass;
+} ClassCompiler;
+
 Parser parser;
 Compiler *current = NULL;
+ClassCompiler *current_class = NULL;
 
 static Chunk *current_chunk() {
     return &current->function->chunk;
@@ -157,6 +165,11 @@ static int emit_jump(uint8_t instruction) {
 }
 
 static void emit_return() {
+    if (current->type == TYPE_INITIALIZER) {
+        emit_bytes(OP_GET_LOCAL, 0);
+    } else {
+        emit_byte(OP_NIL);
+    }
     emit_byte(OP_NIL);
     emit_byte(OP_RETURN);
 }
@@ -200,6 +213,13 @@ static void init_compiler(Compiler *compiler, FunctionType type) {
     Local *local = &current->locals[current->local_count++];
     local->depth = 0;
     local->is_captured = false;
+    if (type != TYPE_FUNCTION) {
+        local->name.start = "this";
+        local->name.length = 4;
+    } else {
+        local->name.start = "";
+        local->name.length = 0;
+    }
     local->name.start = "";
     local->name.length = 0;
 }
@@ -273,6 +293,10 @@ static void dot(bool can_assign) {
     if (can_assign && match(TOKEN_EQUAL)) {
         expression();
         emit_bytes(OP_SET_PROPERTY, name);
+    } else if (match(TOKEN_LEFT_PAREN)) {
+        uint8_t arg_count = argument_list();
+        emit_bytes(OP_INVOKE, name);
+        emit_byte(arg_count);
     } else {
         emit_bytes(OP_GET_PROPERTY, name);
     }
@@ -315,7 +339,8 @@ static void string(bool can_assign) {
 }
 
 static int resolve_local(Compiler *compiler, Token *name);
-static int resolve_upvalue(Compiler *compiler, Token *name); 
+static int resolve_upvalue(Compiler *compiler, Token *name);
+static Token synthetic_token(const char *text);
 
 static void named_variable(Token name, bool can_assign) {
     uint8_t get_op, set_op;
@@ -345,6 +370,14 @@ static void variable(bool can_assign) {
     named_variable(parser.previous, can_assign);
 }
 
+static void this(bool can_assign) {
+    if (current_class == NULL) {
+        error("Can't use 'this' outside of a class.");
+        return;
+    }
+    variable(false);
+}
+
 static void and(bool can_assign) {
     int end_jump = emit_jump(OP_JUMP_IF_FALSE);
 
@@ -365,6 +398,29 @@ static void or(bool can_assign) {
     patch_jump(end_jump);
 }
 
+static void super(bool can_assign) {
+    if (current_class == NULL) {
+        error("Can't use 'super' outside of a class.");
+    } else if (!current_class->has_superclass) {
+        error("Can't use 'super' in a class with no superclass.");
+    }   
+
+    consume(TOKEN_DOT, "Expect '.' after 'super'.");
+    consume(TOKEN_IDENTIFIER, "Expect superclass method name.");
+    uint8_t name = identifier_constant(&parser.previous);
+
+    named_variable(synthetic_token("this"), false);
+    if (match(TOKEN_LEFT_PAREN)) {
+        uint8_t arg_count = argument_list();
+        named_variable(synthetic_token("super"), false);
+        emit_bytes(OP_SUPER_INVOKE, name);
+        emit_byte(arg_count);
+    } else {
+        named_variable(synthetic_token("super"), false);
+        emit_bytes(OP_GET_SUPER, name);
+    }
+}
+
 ParseRule rules[] = {
     [TOKEN_LEFT_PAREN] = {grouping, call, PREC_CALL},
     [TOKEN_RIGHT_PAREN] = {NULL, NULL, PREC_NONE},
@@ -372,23 +428,23 @@ ParseRule rules[] = {
     [TOKEN_RIGHT_BRACE] = {NULL, NULL, PREC_NONE},
     [TOKEN_COMMA] = {NULL, NULL, PREC_NONE},
     [TOKEN_DOT] = {NULL, dot, PREC_CALL},
-    [TOKEN_MINUS] = {unary, binary, PREC_NONE},
-    [TOKEN_PLUS] = {NULL, binary, PREC_NONE},
+    [TOKEN_MINUS] = {unary, binary, PREC_TERM},
+    [TOKEN_PLUS] = {NULL, binary, PREC_TERM},
     [TOKEN_SEMICOLON] = {NULL, NULL, PREC_NONE},
-    [TOKEN_SLASH] = {NULL, binary, PREC_NONE},
-    [TOKEN_STAR] = {NULL, binary, PREC_NONE},
+    [TOKEN_SLASH] = {NULL, binary, PREC_FACTOR},
+    [TOKEN_STAR] = {NULL, binary, PREC_FACTOR},
     [TOKEN_BANG] = {unary, NULL, PREC_NONE},
-    [TOKEN_BANG_EQUAL] = {NULL, binary, PREC_NONE},
+    [TOKEN_BANG_EQUAL] = {NULL, binary, PREC_EQUALITY},
     [TOKEN_EQUAL] = {NULL, NULL, PREC_NONE},
-    [TOKEN_EQUAL_EQUAL] = {NULL, binary, PREC_NONE},
-    [TOKEN_GREATER] = {NULL, binary, PREC_NONE},
-    [TOKEN_GREATER_EQUAL] = {NULL, binary, PREC_NONE},
-    [TOKEN_LESS] = {NULL, binary, PREC_NONE},
-    [TOKEN_LESS_EQUAL] = {NULL, binary, PREC_NONE},
+    [TOKEN_EQUAL_EQUAL] = {NULL, binary, PREC_EQUALITY},
+    [TOKEN_GREATER] = {NULL, binary, PREC_COMPARISON},
+    [TOKEN_GREATER_EQUAL] = {NULL, binary, PREC_COMPARISON},
+    [TOKEN_LESS] = {NULL, binary, PREC_COMPARISON},
+    [TOKEN_LESS_EQUAL] = {NULL, binary, PREC_COMPARISON},
     [TOKEN_IDENTIFIER] = {variable, NULL, PREC_NONE},
     [TOKEN_STRING] = {string, NULL, PREC_NONE},
     [TOKEN_NUMBER] = {number, NULL, PREC_NONE},
-    [TOKEN_AND] = {NULL, and, PREC_NONE},
+    [TOKEN_AND] = {NULL, and, PREC_AND},
     [TOKEN_CLASS] = {NULL, NULL, PREC_NONE},
     [TOKEN_ELSE] = {NULL, NULL, PREC_NONE},
     [TOKEN_FALSE] = {literal, NULL, PREC_NONE},
@@ -396,11 +452,11 @@ ParseRule rules[] = {
     [TOKEN_FUN] = {NULL, NULL, PREC_NONE},
     [TOKEN_IF] = {NULL, NULL, PREC_NONE},
     [TOKEN_NIL] = {literal, NULL, PREC_NONE},
-    [TOKEN_OR] = {NULL, or, PREC_NONE},
+    [TOKEN_OR] = {NULL, or, PREC_OR},
     [TOKEN_PRINT] = {NULL, NULL, PREC_NONE},
     [TOKEN_RETURN] = {NULL, NULL, PREC_NONE},
-    [TOKEN_SUPER] = {NULL, NULL, PREC_NONE},
-    [TOKEN_THIS] = {NULL, NULL, PREC_NONE},
+    [TOKEN_SUPER] = {super, NULL, PREC_NONE},
+    [TOKEN_THIS] = {this, NULL, PREC_NONE},
     [TOKEN_TRUE] = {literal, NULL, PREC_NONE},
     [TOKEN_VAR] = {NULL, NULL, PREC_NONE},
     [TOKEN_WHILE] = {NULL, NULL, PREC_NONE},
@@ -412,7 +468,7 @@ static void parse_precedence(Precedence precedence) {
     advance();
     ParseFn prefix_rule = get_rule(parser.previous.type)->prefix;
     if (prefix_rule == NULL) {
-        error("Expect expression.");
+        error("Expected expression.");
         return;
     }
 
@@ -607,16 +663,69 @@ static void function(FunctionType type) {
     }
 }
 
+static void method() {
+    consume(TOKEN_IDENTIFIER, "Expect method name.");
+    uint8_t constant = identifier_constant(&parser.previous);
+
+    FunctionType type = TYPE_METHOD;
+    if (parser.previous.length == 4 && memcmp(parser.previous.start, "init", 4) == 0) {
+        type = TYPE_INITIALIZER;
+    }
+    function(type);
+    emit_bytes(OP_METHOD, constant);
+}
+
+static Token synthetic_token(const char *text) {
+    Token token;
+    token.start = text;
+    token.length = (int)strlen(text);
+    return token;
+}
+
 static void class_declaration() {
     consume(TOKEN_IDENTIFIER, "Expect class name.");
+    Token class_name = parser.previous;
     uint8_t name_constant = identifier_constant(&parser.previous);
     declare_variable();
 
     emit_bytes(OP_CLASS, name_constant);
     define_variable(name_constant);
 
+    ClassCompiler class_compiler;
+    class_compiler.has_superclass = false;
+    class_compiler.enclosing = current_class;
+    current_class = &class_compiler;
+
+    if (match(TOKEN_LESS)) {
+        consume(TOKEN_IDENTIFIER, "Expect superclass name.");
+        variable(false);
+
+        if (identifiers_equal(&class_name, &parser.previous)) {
+            error("A class cannot inherit from itself.");
+        }
+
+        named_variable(class_name, false);
+        emit_byte(OP_INHERIT);
+        class_compiler.has_superclass = true;
+    }
+
+    begin_scope();
+    add_local(synthetic_token("super"));
+    define_variable(0);
+
+    named_variable(class_name, false);
     consume(TOKEN_LEFT_BRACE, "Expect '{' before class body.");
+    while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+        method();
+    }
     consume(TOKEN_RIGHT_BRACE, "Expect '}' after class body.");
+    emit_byte(OP_POP);
+
+    if (class_compiler.has_superclass) {
+        end_scope();
+    }
+
+    current_class= current_class->enclosing;
 }
 
 static void fun_declaration() {
@@ -721,6 +830,10 @@ static void return_statement() {
     if (match(TOKEN_SEMICOLON)) {
         emit_return();
     } else {
+        if (current->type == TYPE_INITIALIZER) {
+            error("Can't return a value from an initializer.");
+        }
+
         expression();
         consume(TOKEN_SEMICOLON, "Expect ';' after return value.");
         emit_byte(OP_RETURN);

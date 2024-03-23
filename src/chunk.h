@@ -36,7 +36,12 @@ typedef enum {
     OP_SET_UPVALUE,
     OP_CLASS,
     OP_SET_PROPERTY,
-    OP_GET_PROPERTY
+    OP_GET_PROPERTY,
+    OP_METHOD,
+    OP_INVOKE,
+    OP_INHERIT,
+    OP_GET_SUPER,
+    OP_SUPER_INVOKE
 } OpCode;
 
 typedef struct {

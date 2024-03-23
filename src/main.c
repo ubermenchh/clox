@@ -70,5 +70,4 @@ int main(int argc, const char *argv[]) {
    }
 
    free_VM();
-   return 0;
 }
